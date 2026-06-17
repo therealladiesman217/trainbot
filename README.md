@@ -1,9 +1,8 @@
 # Onlytrains
 
-**⚠️ Onlytrains is no longer being maintained due to time constraints. The frontend, with some archived data still available, is at https://trains.jo-m.ch. ⚠️**
 
 Other deployments:
-
+- <https://trains.jo-m.ch/>
 - <https://trains.shakik.de/>
 - <https://trains.rahix.de/>
 
