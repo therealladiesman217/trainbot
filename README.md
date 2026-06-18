@@ -1,7 +1,7 @@
 # Onlytrains
 
 Ich mag Züge!
-https://onltrai.nz/
+https://onlytrai.nz/
 
 Other deployments:
 - <https://trains.jo-m.ch/>
