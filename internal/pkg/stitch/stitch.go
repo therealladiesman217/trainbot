@@ -17,7 +17,33 @@ import (
 
 const (
 	maxMemoryMB = 1024 * 1024 * 50
+
+	// Width (px) of the linear cross-fade between adjacent strips. Clamped per
+	// seam to the involved strip widths, so narrow strips just fade less.
+	featherPx = 8
 )
+
+// featherMask builds a width×height alpha mask that is fully opaque except for a
+// linear ramp over `feather` columns on one side. Drawing a strip through this
+// mask with draw.Over cross-fades it into the (already drawn, opaque) neighbour.
+func featherMask(width, height, feather int, rampLeft bool) *image.Alpha {
+	m := image.NewAlpha(image.Rect(0, 0, width, height))
+	// The mask only varies along x, so compute one row and replicate it.
+	row := make([]uint8, width)
+	for x := range row {
+		a := 255
+		if rampLeft && x < feather {
+			a = x * 255 / feather
+		} else if !rampLeft && x >= width-feather {
+			a = (width - 1 - x) * 255 / feather
+		}
+		row[x] = uint8(a)
+	}
+	for y := 0; y < height; y++ {
+		copy(m.Pix[y*m.Stride:], row)
+	}
+	return m
+}
 
 func isign(x int) int {
 	if x > 0 {
@@ -61,38 +87,115 @@ func stitch(frames []image.Image, dx []int) (*image.RGBA, error) {
 		}
 	}
 
-	// Calculate base width.
+	// All dx must have a consistent sign; that sign is the direction of travel.
 	sign := isign(dx[0])
-	w := fb.Dx() * sign
-	h := fb.Dy()
 	for _, x := range dx[1:] {
 		if isign(x) != sign {
 			return nil, errors.New("dx elements do not have consistent sign")
 		}
-		w += x
+	}
+
+	W := fb.Dx()
+	h := fb.Dy()
+	n := len(frames)
+
+	// Each frame contributes a vertical strip of width |dx[i]| to the panorama.
+	// We sample that strip from the centre of the frame, because findOffset()
+	// measures the alignment on a centred crop and because lens distortion is
+	// smallest there. (The previous implementation kept the leading-edge strip
+	// of every frame, i.e. the most distorted, least-well-registered columns.)
+	//
+	// The centre strips reconstruct the body of the train. The leading/trailing
+	// tip of the train is only ever seen at a frame edge, so the first and last
+	// frames are extended outwards to their frame edge to form the end caps.
+	//
+	// Output width: the outer half of the first frame (cap), plus the sum of all
+	// strips (body), plus the outer half of the last frame (cap).
+	a0 := iabs(dx[0])
+	aLast := iabs(dx[n-1])
+	cap0 := (W - a0) / 2 // Outer-half cap width taken from the first frame.
+	w := cap0 + (W-aLast)/2
+	for _, x := range dx {
+		w += iabs(x)
 	}
 
 	// Memory alloc sanity check.
-	rect := image.Rect(0, 0, iabs(w), h)
+	rect := image.Rect(0, 0, w, h)
 	if rect.Size().X*rect.Size().Y*4 > maxMemoryMB {
 		return nil, fmt.Errorf("would allocate too much memory: size %dx%d", rect.Size().X, rect.Size().Y)
 	}
 	img := image.NewRGBA(rect)
 
-	// Forward?
-	if w > 0 {
-		pos := 0
-		for i, f := range frames {
-			draw.Draw(img, img.Bounds().Add(image.Pt(pos, 0)), f, f.Bounds().Min, draw.Src)
-			pos += dx[i]
+	pos := 0 // Prefix sum of |dx| over the frames already placed.
+	for i, f := range frames {
+		a := iabs(dx[i])
+
+		// Centred source strip, and its placement in the output.
+		srcLo := (W - a) / 2
+		var destLo, destHi int
+		if sign > 0 {
+			// Assemble left to right.
+			destLo = cap0 + pos
+			destHi = destLo + a
+			if i == 0 {
+				// Left cap: extend to the left frame edge.
+				destLo = 0
+				srcLo = 0
+			}
+			if i == n-1 {
+				// Right cap: extend to the right frame edge.
+				destHi = w
+			}
+		} else {
+			// Assemble right to left (mirrored).
+			destHi = w - (cap0 + pos)
+			destLo = destHi - a
+			if i == 0 {
+				// Right cap: extend to the right frame edge.
+				destHi = w
+			}
+			if i == n-1 {
+				// Left cap: extend to the left frame edge.
+				destLo = 0
+				srcLo = 0
+			}
 		}
-	} else {
-		// Backwards.
-		pos := -w - fb.Dx()
-		for i, f := range frames {
-			draw.Draw(img, img.Bounds().Add(image.Pt(pos, 0)), f, f.Bounds().Min, draw.Src)
-			pos += dx[i]
+
+		// Feather this strip into the previously drawn neighbour to hide the
+		// seam. Frame 0 is drawn first and has no neighbour yet, so it stays
+		// hard; every later frame fades in over the side facing frame 0 (the
+		// left for forward assembly, the right for backward).
+		feather := 0
+		if i > 0 {
+			feather = featherPx
+			if feather > a {
+				feather = a
+			}
+			if prev := iabs(dx[i-1]); feather > prev {
+				feather = prev
+			}
 		}
+
+		switch {
+		case feather <= 0:
+			dest := image.Rect(destLo, 0, destHi, h)
+			src := fb.Min.Add(image.Pt(srcLo, 0))
+			draw.Draw(img, dest, f, src, draw.Src)
+		case sign > 0:
+			// Extend left into the neighbour, ramping up from the left.
+			dest := image.Rect(destLo-feather, 0, destHi, h)
+			src := fb.Min.Add(image.Pt(srcLo-feather, 0))
+			mask := featherMask(dest.Dx(), h, feather, true)
+			draw.DrawMask(img, dest, f, src, mask, image.Point{}, draw.Over)
+		default:
+			// Extend right into the neighbour, ramping down to the right.
+			dest := image.Rect(destLo, 0, destHi+feather, h)
+			src := fb.Min.Add(image.Pt(srcLo, 0))
+			mask := featherMask(dest.Dx(), h, feather, false)
+			draw.DrawMask(img, dest, f, src, mask, image.Point{}, draw.Over)
+		}
+
+		pos += a
 	}
 
 	return img, nil
