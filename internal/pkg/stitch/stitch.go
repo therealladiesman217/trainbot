@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"image/gif"
 	"math"
 	"time"
 
-	"github.com/mccutchen/palettor"
-	"github.com/nfnt/resize"
 	"github.com/rs/zerolog/log"
 	"jo-m.ch/go/trainbot/internal/pkg/prometheus"
 )
@@ -218,7 +215,8 @@ type Train struct {
 	Conf Config
 
 	Image *image.RGBA `json:"-"`
-	GIF   *gif.GIF    `json:"-"`
+	// Video is the H.264/MP4 animation of the passing train.
+	Video []byte `json:"-"`
 }
 
 // LengthM returns the absolute length in m.
@@ -249,42 +247,6 @@ func (t *Train) DirectionS() string {
 	}
 
 	return "left"
-}
-
-func createGIF(seq sequence, stitched image.Image) (*gif.GIF, error) {
-	// Extract palette.
-	thumb := resize.Thumbnail(300, 300, stitched, resize.Lanczos3)
-	const (
-		paletteSize = 20
-		nIter       = 100
-	)
-	pal, err := palettor.Extract(paletteSize, nIter, thumb)
-	if err != nil {
-		return nil, err
-	}
-
-	g := gif.GIF{}
-
-	prevTS := *seq.startTS
-	rect := seq.frames[0].Bounds().Sub(seq.frames[0].Bounds().Min)
-	for i, ts := range seq.ts {
-		dt := ts.Sub(prevTS)
-
-		// Skip every other frame.
-		if i%2 == 1 {
-			continue
-		}
-
-		paletted := image.NewPaletted(rect, pal.Colors())
-		draw.Draw(paletted, paletted.Bounds(), seq.frames[i], seq.frames[i].Bounds().Min, draw.Src)
-
-		g.Image = append(g.Image, paletted)
-		g.Delay = append(g.Delay, int(dt.Seconds()*100))
-
-		prevTS = ts
-	}
-
-	return &g, nil
 }
 
 // fitAndStitch tries to stitch an image from a sequence.
@@ -338,15 +300,30 @@ func fitAndStitch(seq sequence, c Config) (*Train, error) {
 		return nil, fmt.Errorf("discarded because too slow, %f < %f", speed, c.minSpeedPxPS())
 	}
 
-	img, err := stitch(seq.frames, dxFit)
+	// Decode the buffered (zstd-compressed) frames for assembly.
+	frames := make([]image.Image, len(seq.frames))
+	decoded := make([]*image.RGBA, len(seq.frames))
+	for i, blob := range seq.frames {
+		f, err := decodeFrame(blob, seq.frameRect)
+		if err != nil {
+			prometheus.RecordFitAndStitchResult("unable_to_assemble_image")
+			return nil, fmt.Errorf("unable to decode frame: %w", err)
+		}
+		frames[i] = f
+		decoded[i] = f
+	}
+
+	img, err := stitch(frames, dxFit)
 	if err != nil {
 		prometheus.RecordFitAndStitchResult("unable_to_assemble_image")
 		return nil, fmt.Errorf("unable to assemble image: %w", err)
 	}
 
-	gif, err := createGIF(seq, img)
+	// The video is a nice-to-have; a failure to encode must not lose the train.
+	video, err := makeVideo(decoded, seq.ts, *seq.startTS)
 	if err != nil {
-		panic(err)
+		log.Err(err).Msg("unable to encode video, continuing without it")
+		video = nil
 	}
 
 	prometheus.RecordFitAndStitchResult("success")
@@ -358,6 +335,6 @@ func fitAndStitch(seq sequence, c Config) (*Train, error) {
 		-a,
 		c,
 		img,
-		gif,
+		video,
 	}, nil
 }

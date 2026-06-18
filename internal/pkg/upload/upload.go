@@ -72,7 +72,7 @@ func All(ctx context.Context, store DataStore, dbx *sqlx.DB, uploader Uploader) 
 			return 0, err
 		}
 
-		log.Info().Str("img", toUpload.ImgFileName()).Str("gif", toUpload.GIFFileName()).Int64("id", toUpload.ID).Msg("uploading")
+		log.Info().Str("img", toUpload.ImgFileName()).Str("video", toUpload.VideoFileName()).Int64("id", toUpload.ID).Msg("uploading")
 
 		err = uploadFile(ctx, uploader, store.GetBlobPath(toUpload.ImgFileName()), serverBlobPath(toUpload.ImgFileName()), false)
 		if err != nil {
@@ -90,7 +90,7 @@ func All(ctx context.Context, store DataStore, dbx *sqlx.DB, uploader Uploader) 
 			}
 		}
 
-		err = uploadFile(ctx, uploader, store.GetBlobPath(toUpload.GIFFileName()), serverBlobPath(toUpload.GIFFileName()), false)
+		err = uploadFile(ctx, uploader, store.GetBlobPath(toUpload.VideoFileName()), serverBlobPath(toUpload.VideoFileName()), false)
 		if err != nil {
 			log.Err(err).Send()
 			if !errors.Is(err, fs.ErrNotExist) {

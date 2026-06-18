@@ -250,13 +250,15 @@ func processTrains(store upload.DataStore, dbx *sqlx.DB, trainsIn <-chan *stitch
 			continue
 		}
 
-		// Dump GIF.
-		err = imutil.DumpGIF(store.GetBlobPath(dbTrain.GIFFileName()), train.GIF)
-		if err != nil {
-			log.Err(err).Send()
-			continue
+		// Dump video.
+		if train.Video != nil {
+			err = os.WriteFile(store.GetBlobPath(dbTrain.VideoFileName()), train.Video, 0o644)
+			if err != nil {
+				log.Err(err).Send()
+				continue
+			}
+			log.Debug().Str("videoFileName", dbTrain.VideoFileName()).Msg("wrote video")
 		}
-		log.Debug().Str("gifFileName", dbTrain.GIFFileName()).Msg("wrote GIF")
 
 		id, err := db.InsertTrain(dbx, *train)
 		if err != nil {
@@ -355,10 +357,10 @@ func deleteOldLocalBlobsOnce(store upload.DataStore, dbx *sqlx.DB) error {
 			}
 		}
 
-		err = os.Remove(store.GetBlobPath(toCleanup.GIFFileName()))
+		err = os.Remove(store.GetBlobPath(toCleanup.VideoFileName()))
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
-				log.Debug().Str("path", toCleanup.GIFFileName()).Msg("tried removing but file does not exist")
+				log.Debug().Str("path", toCleanup.VideoFileName()).Msg("tried removing but file does not exist")
 			} else {
 				log.Err(err).Send()
 				return err

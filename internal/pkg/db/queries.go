@@ -47,10 +47,10 @@ type Train struct {
 	StartTS time.Time `db:"start_ts"`
 }
 
-// GIFFileName returns the GIF file name for this train (derived from timestamp).
-func (t *Train) GIFFileName() string {
+// VideoFileName returns the video file name for this train (derived from timestamp).
+func (t *Train) VideoFileName() string {
 	tsString := t.StartTS.Format(fileTSFormat)
-	return fmt.Sprintf("train_%s.gif", tsString)
+	return fmt.Sprintf("train_%s.mp4", tsString)
 }
 
 // ImgFileName returns the image file name for this train (derived from timestamp).
@@ -176,7 +176,7 @@ func GetAllBlobs(db *sqlx.DB) (map[string]struct{}, error) {
 			return nil, err
 		}
 		ret[train.ImgFileName()] = struct{}{}
-		ret[train.GIFFileName()] = struct{}{}
+		ret[train.VideoFileName()] = struct{}{}
 	}
 
 	return ret, nil

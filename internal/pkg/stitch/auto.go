@@ -71,9 +71,11 @@ type sequence struct {
 
 	// The slices must always have the same length.
 
-	// frame[i] contains the i-th frame.
-	// All frames must have the same image size.
-	frames []image.Image
+	// frame[i] contains the i-th frame, zstd-compressed (see encodeFrame).
+	// All frames must have the same image size, given by frameRect.
+	frames [][]byte
+	// frameRect is the (origin-based) rectangle of every buffered frame.
+	frameRect image.Rectangle
 	// dx[x] is the pixel offset between frames[i-1] and frames[i].
 	// Speed of a frame, in pixels/s is calculated as dx[i]/(ts[i] - ts[i-1]).
 	// dx[0] must never be 0.
@@ -169,13 +171,15 @@ func (r *AutoStitcher) reset() {
 	r.dxAbsLowPass = 0
 }
 
-func (r *AutoStitcher) record(prevTS time.Time, frame image.Image, dx int, ts time.Time) {
+func (r *AutoStitcher) record(prevTS time.Time, frame *image.RGBA, dx int, ts time.Time) {
 	log.Trace().Time("prevTS", prevTS).Time("ts", ts).Int("dx", dx).Msg("record")
 	if r.seq.startTS == nil {
 		r.seq.startTS = &prevTS
 	}
 
-	r.seq.frames = append(r.seq.frames, frame)
+	blob, rect := encodeFrame(frame)
+	r.seq.frameRect = rect
+	r.seq.frames = append(r.seq.frames, blob)
 	r.seq.dx = append(r.seq.dx, dx)
 	r.seq.ts = append(r.seq.ts, ts)
 	prometheus.RecordSequenceLength(len(r.seq.frames))
@@ -279,7 +283,7 @@ func (r *AutoStitcher) Frame(frameColor image.Image, ts time.Time) *Train {
 			return r.TryStitchAndReset()
 		}
 
-		r.record(r.prevFrameTS, frameColor, dx, ts)
+		r.record(r.prevFrameTS, frameRGBA, dx, ts)
 		prometheus.RecordFrameDisposition("recorded")
 		return nil
 	}
@@ -293,7 +297,7 @@ func (r *AutoStitcher) Frame(frameColor image.Image, ts time.Time) *Train {
 	if cos >= goodCosScoreMove && iabs(dx) >= minDx && iabs(dx) <= maxDx {
 		log.Info().Msg("start of new sequence")
 		prometheus.RecordFrameDisposition("recorded_new_sequence")
-		r.record(r.prevFrameTS, frameColor, dx, ts)
+		r.record(r.prevFrameTS, frameRGBA, dx, ts)
 		r.dxAbsLowPass = math.Abs(float64(dx))
 		return nil
 	}

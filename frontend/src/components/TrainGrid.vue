@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Train as TrainType } from '@/lib/db'
-import { getBlobURL, gifFileName } from '@/lib/paths'
+import { getBlobURL, videoFileName } from '@/lib/paths'
 import RelativeTime from '@/components/RelativeTime.vue'
 import FavoriteIcon from '@/components/FavoriteIcon.vue'
 
@@ -18,18 +18,19 @@ defineProps<{
           style="text-decoration: none; color: inherit"
         >
           <v-card>
-            <v-img
-              :src="getBlobURL(gifFileName(train.start_ts))"
-              class="align-end"
-              gradient="to bottom, rgba(0,0,0,.1), rgba(0,0,0,.5)"
-              height="200px"
-              cover
-            >
-              <v-card-title class="text-white">
+            <div class="grid-media">
+              <video
+                :src="getBlobURL(videoFileName(train.start_ts))"
+                autoplay
+                loop
+                muted
+                playsinline
+              ></video>
+              <v-card-title class="grid-title text-white">
                 <RelativeTime :ts="train.start_ts" />
                 <FavoriteIcon :id="train.id" />
               </v-card-title>
-            </v-img>
+            </div>
           </v-card>
         </router-link>
       </v-col>
@@ -40,5 +41,22 @@ defineProps<{
 <style scoped>
 .pointer {
   cursor: pointer;
+}
+.grid-media {
+  position: relative;
+  height: 200px;
+}
+.grid-media video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.grid-title {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.5));
 }
 </style>

@@ -1,7 +1,6 @@
 package stitch
 
 import (
-	"image"
 	"testing"
 	"time"
 
@@ -16,7 +15,7 @@ func genTestSeq(dx []int) sequence {
 
 	seq := sequence{startTS: &t0}
 	for i, dx := range dx {
-		seq.frames = append(seq.frames, &image.RGBA{})
+		seq.frames = append(seq.frames, nil)
 		seq.dx = append(seq.dx, dx)
 		seq.ts = append(seq.ts, t0.Add(time.Second/fps*time.Duration(i+1)))
 	}
